@@ -51,6 +51,7 @@ func main() {
 	api.Get("/documents", handlers.ListDocuments)
 	api.Get("/documents/:id", handlers.GetDocument)
 	api.Get("/documents/:id/prediction", handlers.GetDocumentPrediction)
+	api.Post("/documents/verify-status", handlers.CheckVerificationStatus)
 
 	// Datasets endpoints
 	api.Post("/datasets", handlers.CreateDataset)

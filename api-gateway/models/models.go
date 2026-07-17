@@ -56,24 +56,24 @@ type Document struct {
 	ProjectID   uuid.UUID      `gorm:"type:uuid;index" json:"project_id"`
 	Project     Project        `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	// Entered metadata (from user upload form)
-	EnteredDocType     *DocumentType  `json:"entered_doc_type"`
-	EnteredIDNumber    *string        `json:"entered_id_number"`
-	EnteredFirstName   *string        `json:"entered_first_name"`
-	EnteredSurname     *string        `json:"entered_surname"`
-	EnteredDateOfIssue *string        `json:"entered_date_of_issue"`
-	EnteredDOB         *string        `json:"entered_dob"`
-	EnteredExpiryDate  *string        `json:"entered_expiry_date"`
-	EnteredSex         *string        `json:"entered_sex"`
+	EnteredDocType     *DocumentType    `json:"entered_doc_type"`
+	EnteredIDNumber    *EncryptedString `json:"entered_id_number"`
+	EnteredFirstName   *EncryptedString `json:"entered_first_name"`
+	EnteredSurname     *EncryptedString `json:"entered_surname"`
+	EnteredDateOfIssue *EncryptedString `json:"entered_date_of_issue"`
+	EnteredDOB         *EncryptedString `json:"entered_dob"`
+	EnteredExpiryDate  *EncryptedString `json:"entered_expiry_date"`
+	EnteredSex         *EncryptedString `json:"entered_sex"`
 
 	// Extracted metadata (from OCR processing)
-	ExtractedDocType     *DocumentType  `json:"extracted_doc_type"`
-	ExtractedIDNumber    *string        `json:"extracted_id_number"`
-	ExtractedFirstName   *string        `json:"extracted_first_name"`
-	ExtractedSurname     *string        `json:"extracted_surname"`
-	ExtractedDateOfIssue *string        `json:"extracted_date_of_issue"`
-	ExtractedDOB         *string        `json:"extracted_dob"`
-	ExtractedExpiryDate  *string        `json:"extracted_expiry_date"`
-	ExtractedSex         *string        `json:"extracted_sex"`
+	ExtractedDocType     *DocumentType    `json:"extracted_doc_type"`
+	ExtractedIDNumber    *EncryptedString `json:"extracted_id_number"`
+	ExtractedFirstName   *EncryptedString `json:"extracted_first_name"`
+	ExtractedSurname     *EncryptedString `json:"extracted_surname"`
+	ExtractedDateOfIssue *EncryptedString `json:"extracted_date_of_issue"`
+	ExtractedDOB         *EncryptedString `json:"extracted_dob"`
+	ExtractedExpiryDate  *EncryptedString `json:"extracted_expiry_date"`
+	ExtractedSex         *EncryptedString `json:"extracted_sex"`
 
 	// Verification status & results
 	VerificationStatus string         `gorm:"default:'unverified'" json:"verification_status"` // 'unverified', 'verified', 'failed_verification'
@@ -197,7 +197,7 @@ type ExtractedField struct {
 	DocumentID  uuid.UUID      `gorm:"type:uuid;index" json:"document_id"`
 	Document    Document       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	Key         string         `gorm:"not null" json:"key"`
-	Value       string         `json:"value"`
+	Value       EncryptedString `json:"value"`
 	Confidence  float64        `json:"confidence"`
 	BoundingBox string         `json:"bounding_box"` // coordinates e.g. [[xmin, ymin], [xmax, ymax]]
 	CreatedAt   time.Time      `json:"created_at"`
@@ -209,9 +209,9 @@ type Feedback struct {
 	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	DocumentID     uuid.UUID `gorm:"type:uuid;index" json:"document_id"`
 	Document       Document  `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-	FieldName      string    `gorm:"not null" json:"field_name"`
-	OriginalValue  string    `json:"original_value"`
-	CorrectedValue string    `json:"corrected_value"`
+	FieldName      string          `gorm:"not null" json:"field_name"`
+	OriginalValue  EncryptedString `json:"original_value"`
+	CorrectedValue EncryptedString `json:"corrected_value"`
 	ReviewedBy     uuid.UUID `gorm:"type:uuid;index" json:"reviewed_by"`
 	User           User      `gorm:"foreignKey:ReviewedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
 	CreatedAt      time.Time `json:"created_at"`

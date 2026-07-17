@@ -35,6 +35,7 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_KMS_SECRET_KEY: minio-default-key:B0shcBoDJtjG26tUVUOfoBsLsW85FZ+dkPoMULoaSOY=
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -69,6 +70,7 @@ services:
       - STORAGE_BUCKET=documents
       - JWT_SECRET=supersecretjwttokenkey123!
       - PORT=8080
+      - ENCRYPTION_KEY=super_secret_key_32_bytes_long!!
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,6 +97,7 @@ services:
       - STORAGE_SECRET_KEY=minioadmin
       - STORAGE_USE_SSL=false
       - STORAGE_BUCKET=documents
+      - ENCRYPTION_KEY=super_secret_key_32_bytes_long!!
     depends_on:
       postgres:
         condition: service_healthy

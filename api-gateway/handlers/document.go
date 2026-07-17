@@ -130,13 +130,13 @@ func UploadDocument(c *fiber.Ctx) error {
 		TenantID:           tenantID,
 		ProjectID:          projectID,
 		EnteredDocType:     enteredDocType,
-		EnteredIDNumber:    pEnteredIDNumber,
-		EnteredFirstName:   pEnteredFirstName,
-		EnteredSurname:     pEnteredSurname,
-		EnteredDateOfIssue: pEnteredDateOfIssue,
-		EnteredDOB:         pEnteredDOB,
-		EnteredExpiryDate:  pEnteredExpiryDate,
-		EnteredSex:         pEnteredSex,
+		EnteredIDNumber:    toEncryptedStringPtr(pEnteredIDNumber),
+		EnteredFirstName:   toEncryptedStringPtr(pEnteredFirstName),
+		EnteredSurname:     toEncryptedStringPtr(pEnteredSurname),
+		EnteredDateOfIssue: toEncryptedStringPtr(pEnteredDateOfIssue),
+		EnteredDOB:         toEncryptedStringPtr(pEnteredDOB),
+		EnteredExpiryDate:  toEncryptedStringPtr(pEnteredExpiryDate),
+		EnteredSex:         toEncryptedStringPtr(pEnteredSex),
 		VerificationStatus: "unverified",
 	}
 
@@ -226,4 +226,76 @@ func ListDocuments(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(documents)
+}
+
+type VerificationLookupRequest struct {
+	DocumentType string `json:"document_type"`
+	IDNumber     string `json:"id_number"`
+	FirstName    string `json:"first_name"`
+	Surname      string `json:"surname"`
+}
+
+// CheckVerificationStatus checks if a user is verified using document_type/id_number or first_name/surname
+func CheckVerificationStatus(c *fiber.Ctx) error {
+	tenantIDStr := c.Locals("tenant_id").(string)
+
+	var req VerificationLookupRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to parse request body"})
+	}
+
+	hasDocParams := req.DocumentType != "" && req.IDNumber != ""
+	hasNameParams := req.FirstName != "" && req.Surname != ""
+
+	if !hasDocParams && !hasNameParams {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Must provide either both (document_type and id_number) or both (first_name and surname)",
+		})
+	}
+
+	var documents []models.Document
+	if err := db.DB.Where("tenant_id = ? AND verification_status = 'verified'", tenantIDStr).Find(&documents).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to query documents"})
+	}
+
+	for _, doc := range documents {
+		matched := false
+		matchedBy := ""
+
+		if hasDocParams {
+			if doc.ExtractedDocType != nil && string(*doc.ExtractedDocType) == req.DocumentType &&
+				doc.ExtractedIDNumber != nil && string(*doc.ExtractedIDNumber) == req.IDNumber {
+				matched = true
+				matchedBy = "document_info"
+			}
+		}
+
+		if !matched && hasNameParams {
+			if doc.ExtractedFirstName != nil && string(*doc.ExtractedFirstName) == req.FirstName &&
+				doc.ExtractedSurname != nil && string(*doc.ExtractedSurname) == req.Surname {
+				matched = true
+				matchedBy = "name_info"
+			}
+		}
+
+		if matched {
+			return c.JSON(fiber.Map{
+				"verified":    true,
+				"document_id": doc.ID,
+				"matched_by":  matchedBy,
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{
+		"verified": false,
+	})
+}
+
+func toEncryptedStringPtr(s *string) *models.EncryptedString {
+	if s == nil {
+		return nil
+	}
+	es := models.EncryptedString(*s)
+	return &es
 }

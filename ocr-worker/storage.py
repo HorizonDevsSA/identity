@@ -42,7 +42,12 @@ def upload_file(local_file_path, object_name):
     bucket_name = os.getenv("STORAGE_BUCKET", "documents")
     s3 = get_s3_client()
     try:
-        s3.upload_file(local_file_path, bucket_name, object_name)
+        s3.upload_file(
+            local_file_path, 
+            bucket_name, 
+            object_name,
+            ExtraArgs={'ServerSideEncryption': 'AES256'}
+        )
         print(f"Uploaded {local_file_path} to {object_name}")
         return True
     except Exception as e:

@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy and install python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+RUN pip install --default-timeout=100 --no-cache-dir cryptography
 
 # Pre-download docTR model weights during image building
 RUN python -c "from doctr.models import ocr_predictor; ocr_predictor(det_arch='db_resnet50', reco_arch='crnn_vgg16_bn', pretrained=True)"

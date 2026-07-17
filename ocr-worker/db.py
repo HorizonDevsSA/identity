@@ -1,6 +1,7 @@
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from encryption import encrypt, decrypt
 
 def get_db_connection():
     host = os.getenv("DB_HOST", "localhost")
@@ -68,7 +69,19 @@ def save_document_metadata(doc_id, doc_type, id_number, first_name, surname, dat
                     verification_status = %s, verification_result = %s, updated_at = NOW() 
                 WHERE id = %s
                 """,
-                (doc_type, id_number, first_name, surname, date_of_issue, dob, expiry_date, sex, verification_status, verification_result, doc_id)
+                (
+                    doc_type, 
+                    encrypt(id_number), 
+                    encrypt(first_name), 
+                    encrypt(surname), 
+                    encrypt(date_of_issue), 
+                    encrypt(dob), 
+                    encrypt(expiry_date), 
+                    encrypt(sex), 
+                    verification_status, 
+                    verification_result, 
+                    doc_id
+                )
             )
         conn.commit()
     except Exception as e:
@@ -89,7 +102,12 @@ def get_entered_document_metadata(doc_id):
                 """,
                 (doc_id,)
             )
-            return cur.fetchone()
+            row = cur.fetchone()
+            if row:
+                for k in ["entered_id_number", "entered_first_name", "entered_surname", "entered_date_of_issue", "entered_dob", "entered_expiry_date", "entered_sex"]:
+                    if row.get(k) is not None:
+                        row[k] = decrypt(row[k])
+            return row
     except Exception as e:
         print(f"Database error fetching entered metadata: {e}")
         return None
@@ -217,7 +235,7 @@ def save_extracted_fields(doc_id, extracted_fields_list):
                     INSERT INTO extracted_fields (id, document_id, key, value, confidence, bounding_box, created_at, updated_at)
                     VALUES (gen_random_uuid(), %s, %s, %s, %s, %s, NOW(), NOW())
                     """,
-                    (doc_id, field["key"], field["value"], field["confidence"], field["bounding_box"])
+                    (doc_id, field["key"], encrypt(field["value"]), field["confidence"], field["bounding_box"])
                 )
         conn.commit()
     except Exception as e:

@@ -12,6 +12,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/encrypt"
 )
 
 var MinioClient *minio.Client
@@ -79,7 +80,8 @@ func InitStorage() {
 // UploadFile uploads an io.Reader to MinIO and returns the destination object name
 func UploadFile(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) (string, error) {
 	_, err := MinioClient.PutObject(ctx, BucketName, objectName, reader, size, minio.PutObjectOptions{
-		ContentType: contentType,
+		ContentType:          contentType,
+		ServerSideEncryption: encrypt.NewSSE(),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload object: %w", err)

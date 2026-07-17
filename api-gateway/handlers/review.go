@@ -88,58 +88,65 @@ func ReviewDocument(c *fiber.Ctx) error {
 			switch fieldName {
 			case "first_name":
 				if document.ExtractedFirstName != nil {
-					origVal = *document.ExtractedFirstName
+					origVal = string(*document.ExtractedFirstName)
 				}
 				if origVal != correctedVal {
-					document.ExtractedFirstName = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedFirstName = &es
 					changed = true
 				}
 			case "surname":
 				if document.ExtractedSurname != nil {
-					origVal = *document.ExtractedSurname
+					origVal = string(*document.ExtractedSurname)
 				}
 				if origVal != correctedVal {
-					document.ExtractedSurname = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedSurname = &es
 					changed = true
 				}
 			case "id_number":
 				if document.ExtractedIDNumber != nil {
-					origVal = *document.ExtractedIDNumber
+					origVal = string(*document.ExtractedIDNumber)
 				}
 				if origVal != correctedVal {
-					document.ExtractedIDNumber = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedIDNumber = &es
 					changed = true
 				}
 			case "dob":
 				if document.ExtractedDOB != nil {
-					origVal = *document.ExtractedDOB
+					origVal = string(*document.ExtractedDOB)
 				}
 				if origVal != correctedVal {
-					document.ExtractedDOB = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedDOB = &es
 					changed = true
 				}
 			case "date_of_issue":
 				if document.ExtractedDateOfIssue != nil {
-					origVal = *document.ExtractedDateOfIssue
+					origVal = string(*document.ExtractedDateOfIssue)
 				}
 				if origVal != correctedVal {
-					document.ExtractedDateOfIssue = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedDateOfIssue = &es
 					changed = true
 				}
 			case "expiry_date":
 				if document.ExtractedExpiryDate != nil {
-					origVal = *document.ExtractedExpiryDate
+					origVal = string(*document.ExtractedExpiryDate)
 				}
 				if origVal != correctedVal {
-					document.ExtractedExpiryDate = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedExpiryDate = &es
 					changed = true
 				}
 			case "sex":
 				if document.ExtractedSex != nil {
-					origVal = *document.ExtractedSex
+					origVal = string(*document.ExtractedSex)
 				}
 				if origVal != correctedVal {
-					document.ExtractedSex = &correctedVal
+					es := models.EncryptedString(correctedVal)
+					document.ExtractedSex = &es
 					changed = true
 				}
 			case "doc_type":
@@ -158,8 +165,8 @@ func ReviewDocument(c *fiber.Ctx) error {
 					ID:             uuid.New(),
 					DocumentID:     docID,
 					FieldName:      fieldName,
-					OriginalValue:  origVal,
-					CorrectedValue: correctedVal,
+					OriginalValue:  models.EncryptedString(origVal),
+					CorrectedValue: models.EncryptedString(correctedVal),
 					ReviewedBy:     userID,
 				}
 				if err := tx.Create(&feedback).Error; err != nil {
@@ -201,7 +208,7 @@ func ReviewDocument(c *fiber.Ctx) error {
 			}
 
 			// Add Annotations for corrected/final document values
-			var labelFields = map[string]*string{
+			var labelFields = map[string]*models.EncryptedString{
 				"id_number":     document.ExtractedIDNumber,
 				"first_name":    document.ExtractedFirstName,
 				"surname":       document.ExtractedSurname,
@@ -217,7 +224,7 @@ func ReviewDocument(c *fiber.Ctx) error {
 						ID:             uuid.New(),
 						DatasetImageID: datasetImageID,
 						BoundingBox:    "[[0.0, 0.0], [1.0, 1.0]]", // Fallback full-image box
-						Label:          fmt.Sprintf("%s: %s", key, *valPtr),
+						Label:          fmt.Sprintf("%s: %s", key, string(*valPtr)),
 						CreatedBy:      userID,
 					}
 					if err := tx.Create(&annotation).Error; err != nil {
