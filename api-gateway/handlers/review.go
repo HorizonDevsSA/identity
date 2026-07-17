@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strings"
 
 	"api-gateway/db"
 	"api-gateway/models"
@@ -175,6 +176,36 @@ func ReviewDocument(c *fiber.Ctx) error {
 			}
 		}
 
+		// Check if verifying this document will cause duplicate active verified identities
+		var finalFirst, finalSurname, finalDOB string
+		if document.ExtractedFirstName != nil {
+			finalFirst = string(*document.ExtractedFirstName)
+		} else if document.EnteredFirstName != nil {
+			finalFirst = string(*document.EnteredFirstName)
+		}
+
+		if document.ExtractedSurname != nil {
+			finalSurname = string(*document.ExtractedSurname)
+		} else if document.EnteredSurname != nil {
+			finalSurname = string(*document.EnteredSurname)
+		}
+
+		if document.ExtractedDOB != nil {
+			finalDOB = string(*document.ExtractedDOB)
+		} else if document.EnteredDOB != nil {
+			finalDOB = string(*document.EnteredDOB)
+		}
+
+		if finalFirst != "" && finalSurname != "" && finalDOB != "" {
+			isDup, err := isDuplicateVerifiedIdentity(tenantIDStr, finalFirst, finalSurname, finalDOB, document.ID.String())
+			if err != nil {
+				return err
+			}
+			if isDup {
+				return fmt.Errorf("CONFLICT: Identity already verified under another active document")
+			}
+		}
+
 		// Update document verification status
 		document.VerificationStatus = "verified"
 		document.Status = "completed"
@@ -251,6 +282,9 @@ func ReviewDocument(c *fiber.Ctx) error {
 	})
 
 	if err != nil {
+		if strings.HasPrefix(err.Error(), "CONFLICT:") {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": strings.TrimPrefix(err.Error(), "CONFLICT: ")})
+		}
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to submit review: %v", err)})
 	}
 

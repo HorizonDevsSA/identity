@@ -48,6 +48,18 @@ services:
       timeout: 5s
       retries: 5
 
+  clamav:
+    image: clamav/clamav:stable
+    platform: linux/amd64
+    container_name: ocr_clamav
+    ports:
+      - "3310:3310"
+    healthcheck:
+      test: ["CMD", "clamdscan", "-c", "/etc/clamav/clamd.conf", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
   api-gateway:
     build:
       context: ./api-gateway
@@ -71,6 +83,7 @@ services:
       - JWT_SECRET=supersecretjwttokenkey123!
       - PORT=8080
       - ENCRYPTION_KEY=super_secret_key_32_bytes_long!!
+      - CLAMAV_URL=clamav:3310
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +91,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      clamav:
+        condition: service_started
 
   ocr-worker:
     build:

@@ -2,6 +2,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from encryption import encrypt, decrypt
+import datetime
 
 def get_db_connection():
     host = os.getenv("DB_HOST", "localhost")
@@ -240,6 +241,71 @@ def save_extracted_fields(doc_id, extracted_fields_list):
         conn.commit()
     except Exception as e:
         print(f"Database error saving extracted fields: {e}")
+    finally:
+        conn.close()
+
+def normalize_string(s):
+    if not s:
+        return ""
+    return "".join(s.lower().split())
+
+def is_expired(expiry_str):
+    if not expiry_str:
+        return False
+    formats = ["%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d"]
+    expiry_str = expiry_str.strip()
+    for fmt in formats:
+        try:
+            t = datetime.datetime.strptime(expiry_str, fmt).date()
+            return t < datetime.date.today()
+        except ValueError:
+            continue
+    return False
+
+def check_existing_verified_identity(tenant_id, first_name, surname, dob, exclude_doc_id=None):
+    if not first_name or not surname or not dob:
+        return False
+
+    norm_first = normalize_string(first_name)
+    norm_surname = normalize_string(surname)
+    norm_dob = normalize_string(dob)
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, extracted_doc_type, extracted_first_name, extracted_surname, extracted_dob, extracted_expiry_date
+                FROM documents 
+                WHERE tenant_id = %s AND verification_status = 'verified'
+                """,
+                (tenant_id,)
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                if exclude_doc_id and str(row["id"]) == str(exclude_doc_id):
+                    continue
+
+                # Decrypt values
+                doc_first = decrypt(row["extracted_first_name"])
+                doc_surname = decrypt(row["extracted_surname"])
+                doc_dob = decrypt(row["extracted_dob"])
+                doc_type = row["extracted_doc_type"]
+                doc_expiry = decrypt(row["extracted_expiry_date"])
+
+                if (normalize_string(doc_first) == norm_first and
+                    normalize_string(doc_surname) == norm_surname and
+                    normalize_string(doc_dob) == norm_dob):
+                    
+                    # If non-national ID and expired, let it pass
+                    if doc_type != "national_id" and is_expired(doc_expiry):
+                        continue
+                    
+                    return True
+            return False
+    except Exception as e:
+        print(f"Database error checking duplicate identity: {e}")
+        return False
     finally:
         conn.close()
 

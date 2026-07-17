@@ -2,8 +2,15 @@ package handlers
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"api-gateway/db"
 	"api-gateway/models"
@@ -59,6 +66,47 @@ func UploadDocument(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to open file"})
 	}
 	defer file.Close()
+
+	// 1. Content Validation via Magic Bytes
+	headBuf := make([]byte, 512)
+	n, err := file.Read(headBuf)
+	if err != nil && err != io.EOF {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to read file header"})
+	}
+	detectedType := http.DetectContentType(headBuf[:n])
+
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to reset file read offset"})
+	}
+
+	allowedTypes := map[string]bool{
+		"image/png":       true,
+		"image/jpeg":      true,
+		"image/gif":       true,
+		"image/webp":      true,
+		"application/pdf": true,
+	}
+	if !allowedTypes[detectedType] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Invalid file content type detected: %s. Only PDF, PNG, JPG/JPEG are allowed", detectedType),
+		})
+	}
+
+	// 2. Malware Scanning via ClamAV (TCP INSTREAM)
+	clean, virusName, err := scanFile(file)
+	if err != nil {
+		fmt.Printf("WARNING: ClamAV virus scan skipped or failed: %v\n", err)
+	} else if !clean {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Malware detected: %s", virusName),
+		})
+	}
+
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to reset file read offset post-scan"})
+	}
 
 	// Generate document details
 	documentID := uuid.New()
@@ -119,6 +167,17 @@ func UploadDocument(c *fiber.Ctx) error {
 	var pEnteredSex *string
 	if enteredSex != "" {
 		pEnteredSex = &enteredSex
+	}
+
+	// Check for active duplicate verified identity if name/DOB parameters are entered
+	if enteredFirstName != "" && enteredSurname != "" && enteredDOB != "" {
+		isDup, err := isDuplicateVerifiedIdentity(tenantIDStr, enteredFirstName, enteredSurname, enteredDOB, "")
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to verify duplicate identity status"})
+		}
+		if isDup {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Identity already verified under another active document"})
+		}
 	}
 
 	// Create document record in Database
@@ -298,4 +357,144 @@ func toEncryptedStringPtr(s *string) *models.EncryptedString {
 	}
 	es := models.EncryptedString(*s)
 	return &es
+}
+
+func normalizeString(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), ""))
+}
+
+func isExpired(expiryStr string) bool {
+	if expiryStr == "" {
+		return false
+	}
+	formats := []string{
+		"02-01-2006",
+		"02/01/2006",
+		"2006-01-02",
+	}
+	expiryStr = strings.TrimSpace(expiryStr)
+	for _, f := range formats {
+		t, err := time.Parse(f, expiryStr)
+		if err == nil {
+			now := time.Now().Truncate(24 * time.Hour)
+			return t.Before(now)
+		}
+	}
+	return false
+}
+
+func isDuplicateVerifiedIdentity(tenantIDStr, firstName, surname, dob, excludeDocID string) (bool, error) {
+	if firstName == "" || surname == "" || dob == "" {
+		return false, nil
+	}
+
+	var docs []models.Document
+	err := db.DB.Where("tenant_id = ? AND verification_status = 'verified'", tenantIDStr).Find(&docs).Error
+	if err != nil {
+		return false, err
+	}
+
+	normFirst := normalizeString(firstName)
+	normSurname := normalizeString(surname)
+	normDob := normalizeString(dob)
+
+	for _, doc := range docs {
+		if excludeDocID != "" && doc.ID.String() == excludeDocID {
+			continue
+		}
+
+		var docFirst, docSurname, docDob, docDocType, docExpiry string
+		if doc.ExtractedFirstName != nil {
+			docFirst = string(*doc.ExtractedFirstName)
+		}
+		if doc.ExtractedSurname != nil {
+			docSurname = string(*doc.ExtractedSurname)
+		}
+		if doc.ExtractedDOB != nil {
+			docDob = string(*doc.ExtractedDOB)
+		}
+		if doc.ExtractedDocType != nil {
+			docDocType = string(*doc.ExtractedDocType)
+		}
+		if doc.ExtractedExpiryDate != nil {
+			docExpiry = string(*doc.ExtractedExpiryDate)
+		}
+
+		if normalizeString(docFirst) == normFirst &&
+			normalizeString(docSurname) == normSurname &&
+			normalizeString(docDob) == normDob {
+
+			// If non-national ID and expired, let it pass
+			if docDocType != "national_id" && isExpired(docExpiry) {
+				continue
+			}
+
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func scanFile(reader io.Reader) (bool, string, error) {
+	clamavAddr := os.Getenv("CLAMAV_URL")
+	if clamavAddr == "" {
+		clamavAddr = "clamav:3310"
+	}
+
+	conn, err := net.DialTimeout("tcp", clamavAddr, 2*time.Second)
+	if err != nil {
+		return false, "", fmt.Errorf("clamav connection failed: %w", err)
+	}
+	defer conn.Close()
+
+	// Send INSTREAM command
+	_, err = conn.Write([]byte("zINSTREAM\x00"))
+	if err != nil {
+		return false, "", err
+	}
+
+	buf := make([]byte, 8192)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			// Chunk prefix: 4-byte big-endian chunk length
+			lenBuf := make([]byte, 4)
+			binary.BigEndian.PutUint32(lenBuf, uint32(n))
+			if _, err := conn.Write(lenBuf); err != nil {
+				return false, "", err
+			}
+			if _, err := conn.Write(buf[:n]); err != nil {
+				return false, "", err
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return false, "", err
+		}
+	}
+
+	// Send zero-length chunk to signal EOF to ClamAV
+	if _, err := conn.Write([]byte{0, 0, 0, 0}); err != nil {
+		return false, "", err
+	}
+
+	// Read response
+	resp, err := io.ReadAll(conn)
+	if err != nil {
+		return false, "", err
+	}
+
+	respStr := string(resp)
+	if strings.Contains(respStr, "OK") {
+		return true, "", nil
+	}
+
+	if strings.Contains(respStr, "FOUND") {
+		return false, strings.TrimSpace(respStr), nil
+	}
+
+	return false, respStr, fmt.Errorf("unexpected response from ClamAV: %s", respStr)
 }

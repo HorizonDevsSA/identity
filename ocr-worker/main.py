@@ -276,6 +276,19 @@ def main():
                     # Run comparison / verification
                     status_ver, result_ver = compare_metadata(entered, meta)
                     
+                    if status_ver == "verified":
+                        from db import check_existing_verified_identity
+                        fn = meta.get("first_name") or (entered.get("entered_first_name") if entered else None)
+                        sn = meta.get("surname") or (entered.get("entered_surname") if entered else None)
+                        dob = meta.get("dob") or (entered.get("entered_dob") if entered else None)
+                        
+                        if check_existing_verified_identity(tenant_id, fn, sn, dob, doc_id):
+                            status_ver = "failed_verification"
+                            res_map = json.loads(result_ver) if result_ver else {}
+                            res_map["duplicate_verification"] = False
+                            res_map["message"] = "Identity already verified under another active document"
+                            result_ver = json.dumps(res_map)
+                    
                     save_document_metadata(
                         doc_id,
                         meta.get("doc_type"),
