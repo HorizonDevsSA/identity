@@ -67,7 +67,22 @@ func UploadDocument(c *fiber.Ctx) error {
 	}
 	defer file.Close()
 
-	// 1. Content Validation via Magic Bytes
+	// 1. Malware Scanning via ClamAV (TCP INSTREAM)
+	clean, virusName, err := scanFile(file)
+	if err != nil {
+		fmt.Printf("WARNING: ClamAV virus scan skipped or failed: %v\n", err)
+	} else if !clean {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Malware detected: %s", virusName),
+		})
+	}
+
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to reset file read offset post-scan"})
+	}
+
+	// 2. Content Validation via Magic Bytes
 	headBuf := make([]byte, 512)
 	n, err := file.Read(headBuf)
 	if err != nil && err != io.EOF {
@@ -91,21 +106,6 @@ func UploadDocument(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": fmt.Sprintf("Invalid file content type detected: %s. Only PDF, PNG, JPG/JPEG are allowed", detectedType),
 		})
-	}
-
-	// 2. Malware Scanning via ClamAV (TCP INSTREAM)
-	clean, virusName, err := scanFile(file)
-	if err != nil {
-		fmt.Printf("WARNING: ClamAV virus scan skipped or failed: %v\n", err)
-	} else if !clean {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": fmt.Sprintf("Malware detected: %s", virusName),
-		})
-	}
-
-	_, err = file.Seek(0, io.SeekStart)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to reset file read offset post-scan"})
 	}
 
 	// Generate document details
@@ -454,10 +454,12 @@ func scanFile(reader io.Reader) (bool, string, error) {
 		return false, "", err
 	}
 
+	totalBytes := 0
 	buf := make([]byte, 8192)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
+			totalBytes += n
 			// Chunk prefix: 4-byte big-endian chunk length
 			lenBuf := make([]byte, 4)
 			binary.BigEndian.PutUint32(lenBuf, uint32(n))
@@ -488,6 +490,8 @@ func scanFile(reader io.Reader) (bool, string, error) {
 	}
 
 	respStr := string(resp)
+	fmt.Printf("[ClamAV Scan] Sent %d bytes. Response: %q\n", totalBytes, respStr)
+
 	if strings.Contains(respStr, "OK") {
 		return true, "", nil
 	}
