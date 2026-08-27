@@ -304,6 +304,24 @@ def main():
                     )
                     print(f"Extracted document metadata: {meta}")
                     print(f"Verification completed: status={status_ver}, results={result_ver}")
+
+                    # ZWC Blockchain Integration: Whitelist and register alias
+                    if status_ver == "verified":
+                        try:
+                            from db import get_blockchain_fields
+                            from blockchain import register_user_on_chain
+                            import threading
+
+                            bc_fields = get_blockchain_fields(doc_id)
+                            if bc_fields and bc_fields.get("wallet_address"):
+                                print(f"[ZWC-INTEGRATION] Auto-verification triggered ZWC registration for document {doc_id}")
+                                w_addr = bc_fields["wallet_address"]
+                                a_type = bc_fields.get("alias_type")
+                                a_val = bc_fields.get("alias_value")
+                                t = threading.Thread(target=register_user_on_chain, args=(w_addr, a_type, a_val))
+                                t.start()
+                        except Exception as ex:
+                            print(f"[ZWC-ERROR] Failed to start blockchain registration thread: {ex}")
                     
                     # 6.5 Run layout-aware custom schema extraction (Phase 4)
                     try:

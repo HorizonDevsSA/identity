@@ -180,6 +180,29 @@ func UploadDocument(c *fiber.Ctx) error {
 		}
 	}
 
+	// Derive deterministic wallet address from entered ID number and master salt
+	masterSalt := os.Getenv("ZWC_MASTER_SALT")
+	if masterSalt == "" {
+		masterSalt = "zwc_default_secure_salt_2026"
+	}
+	derivedAddress, err := services.DeriveWalletAddress(*pEnteredIDNumber, masterSalt)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Failed to derive wallet address: %v", err)})
+	}
+	pWalletAddress := &derivedAddress
+
+	aliasType := c.FormValue("alias_type")
+	var pAliasType *string
+	if aliasType != "" {
+		pAliasType = &aliasType
+	}
+
+	aliasValue := c.FormValue("alias_value")
+	var pAliasValue *string
+	if aliasValue != "" {
+		pAliasValue = &aliasValue
+	}
+
 	// Create document record in Database
 	document := models.Document{
 		ID:                 documentID,
@@ -197,6 +220,9 @@ func UploadDocument(c *fiber.Ctx) error {
 		EnteredExpiryDate:  toEncryptedStringPtr(pEnteredExpiryDate),
 		EnteredSex:         toEncryptedStringPtr(pEnteredSex),
 		VerificationStatus: "unverified",
+		WalletAddress:      pWalletAddress,
+		AliasType:          pAliasType,
+		AliasValue:         pAliasValue,
 	}
 
 	if err := db.DB.Create(&document).Error; err != nil {

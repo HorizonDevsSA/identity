@@ -79,6 +79,11 @@ type Document struct {
 	VerificationStatus string         `gorm:"default:'unverified'" json:"verification_status"` // 'unverified', 'verified', 'failed_verification'
 	VerificationResult *string        `gorm:"type:text" json:"verification_result"` // JSON details of matching fields
 
+	// Blockchain registration target
+	WalletAddress *string `json:"wallet_address"`
+	AliasType     *string `json:"alias_type"`
+	AliasValue    *string `json:"alias_value"`
+
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`

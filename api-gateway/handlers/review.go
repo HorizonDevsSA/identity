@@ -6,6 +6,7 @@ import (
 
 	"api-gateway/db"
 	"api-gateway/models"
+	"api-gateway/services"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -211,6 +212,23 @@ func ReviewDocument(c *fiber.Ctx) error {
 		document.Status = "completed"
 		if err := tx.Save(&document).Error; err != nil {
 			return err
+		}
+
+		// ZWC Blockchain integration: Whitelist address and register alias
+		if document.WalletAddress != nil && *document.WalletAddress != "" {
+			aliasVal := ""
+			if document.AliasValue != nil {
+				aliasVal = *document.AliasValue
+			}
+			aliasType := ""
+			if document.AliasType != nil {
+				aliasType = *document.AliasType
+			}
+			go func(addr, aType, aVal string) {
+				if err := services.RegisterUserOnChain(addr, aType, aVal); err != nil {
+					fmt.Printf("[ZWC-ERROR] Failed to register user on chain: %v\n", err)
+				}
+			}(*document.WalletAddress, aliasType, aliasVal)
 		}
 
 		// 2. Continuous Learning Loop: Register corrected file in dataset

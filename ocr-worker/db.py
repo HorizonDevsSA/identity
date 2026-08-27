@@ -309,5 +309,24 @@ def check_existing_verified_identity(tenant_id, first_name, surname, dob, exclud
     finally:
         conn.close()
 
+def get_blockchain_fields(doc_id):
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT wallet_address, alias_type, alias_value
+                FROM documents 
+                WHERE id = %s
+                """,
+                (doc_id,)
+            )
+            return cur.fetchone()
+    except Exception as e:
+        print(f"Database error fetching blockchain fields: {e}")
+        return None
+    finally:
+        conn.close()
+
 
 
