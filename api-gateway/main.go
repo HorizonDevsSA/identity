@@ -43,52 +43,54 @@ func main() {
 	app.Post("/auth/register", handlers.Register)
 	app.Post("/auth/login", handlers.Login)
 
-	// Authenticated routes
-	api := app.Group("/api", handlers.JWTMiddleware)
+	// Open Public KYC Document Upload (bypasses tenant, automatic fallback to default system tenant)
+	app.Post("/api/documents/upload", handlers.OptionalJWTMiddleware, handlers.UploadDocument)
 
-	// Documents endpoints
-	api.Post("/documents/upload", handlers.UploadDocument)
-	api.Get("/documents", handlers.ListDocuments)
-	api.Get("/documents/:id", handlers.GetDocument)
-	api.Get("/documents/:id/prediction", handlers.GetDocumentPrediction)
-	api.Post("/documents/verify-status", handlers.CheckVerificationStatus)
+	// Open Verification Status Lookup (for checking KYC verification status)
+	app.Post("/api/documents/verify-status", handlers.OptionalJWTMiddleware, handlers.CheckVerificationStatus)
+
+	// Admin & Reviewer Restricted Routes (JWT + Admin/Reviewer role required)
+	adminApi := app.Group("/api", handlers.JWTMiddleware, handlers.RequireAdminOrReviewer)
+
+	// Documents endpoints (Admin-restricted view & inspect)
+	adminApi.Get("/documents", handlers.ListDocuments)
+	adminApi.Get("/documents/:id", handlers.GetDocument)
+	adminApi.Get("/documents/:id/prediction", handlers.GetDocumentPrediction)
+	adminApi.Get("/documents/:id/extracted-fields", handlers.GetExtractedFields)
+
+	// Reviews & manual verification endpoints (Admin/Reviewer only)
+	adminApi.Get("/reviews", handlers.ListReviewQueue)
+	adminApi.Post("/documents/:id/review", handlers.ReviewDocument)
 
 	// Datasets endpoints
-	api.Post("/datasets", handlers.CreateDataset)
-	api.Get("/datasets", handlers.ListDatasets)
-	api.Get("/datasets/:id", handlers.GetDataset)
-	api.Delete("/datasets/:id", handlers.DeleteDataset)
+	adminApi.Post("/datasets", handlers.CreateDataset)
+	adminApi.Get("/datasets", handlers.ListDatasets)
+	adminApi.Get("/datasets/:id", handlers.GetDataset)
+	adminApi.Delete("/datasets/:id", handlers.DeleteDataset)
 
 	// Dataset images endpoints
-	api.Post("/datasets/:id/images", handlers.UploadDatasetImage)
-	api.Get("/datasets/images/:image_id", handlers.GetDatasetImage)
-	api.Delete("/datasets/images/:image_id", handlers.DeleteDatasetImage)
+	adminApi.Post("/datasets/:id/images", handlers.UploadDatasetImage)
+	adminApi.Get("/datasets/images/:image_id", handlers.GetDatasetImage)
+	adminApi.Delete("/datasets/images/:image_id", handlers.DeleteDatasetImage)
 
 	// Image annotations endpoints
-	api.Post("/datasets/images/:image_id/annotations", handlers.SaveAnnotations)
-	api.Get("/datasets/images/:image_id/annotations", handlers.GetAnnotations)
+	adminApi.Post("/datasets/images/:image_id/annotations", handlers.SaveAnnotations)
+	adminApi.Get("/datasets/images/:image_id/annotations", handlers.GetAnnotations)
 
 	// Training endpoints
-	api.Post("/training/start", handlers.StartTrainingJob)
-	api.Get("/training/jobs", handlers.ListTrainingJobs)
-	api.Get("/training/jobs/:id", handlers.GetTrainingJob)
+	adminApi.Post("/training/start", handlers.StartTrainingJob)
+	adminApi.Get("/training/jobs", handlers.ListTrainingJobs)
+	adminApi.Get("/training/jobs/:id", handlers.GetTrainingJob)
 
 	// Models endpoints
-	api.Get("/models", handlers.ListModels)
-	api.Post("/models/:id/deploy", handlers.DeployModelVersion)
+	adminApi.Get("/models", handlers.ListModels)
+	adminApi.Post("/models/:id/deploy", handlers.DeployModelVersion)
 
 	// Extraction schemas
-	api.Post("/schemas", handlers.CreateSchema)
-	api.Get("/schemas", handlers.ListSchemas)
-	api.Get("/schemas/:id", handlers.GetSchema)
-	api.Delete("/schemas/:id", handlers.DeleteSchema)
-
-	// Extracted fields
-	api.Get("/documents/:id/extracted-fields", handlers.GetExtractedFields)
-
-	// Reviews & manual verification endpoints
-	api.Get("/reviews", handlers.ListReviewQueue)
-	api.Post("/documents/:id/review", handlers.ReviewDocument)
+	adminApi.Post("/schemas", handlers.CreateSchema)
+	adminApi.Get("/schemas", handlers.ListSchemas)
+	adminApi.Get("/schemas/:id", handlers.GetSchema)
+	adminApi.Delete("/schemas/:id", handlers.DeleteSchema)
 
 
 

@@ -18,20 +18,18 @@ type ReviewRequest struct {
 	AddToDatasetID  string            `json:"add_to_dataset_id"`
 }
 
-// ListReviewQueue lists all documents waiting for human review
+// ListReviewQueue lists all documents waiting for human review (Admin/Reviewer)
 func ListReviewQueue(c *fiber.Ctx) error {
-	tenantIDStr, ok := c.Locals("tenant_id").(string)
-	if !ok || tenantIDStr == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized tenant"})
-	}
+	role, _ := c.Locals("role").(string)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
 
 	var documents []models.Document
-	// Queue includes failed_verification or unverified
-	err := db.DB.Where("tenant_id = ? AND (verification_status = ? OR verification_status = ?)", 
-		tenantIDStr, "failed_verification", "unverified").
-		Order("created_at desc").
-		Find(&documents).Error
+	query := db.DB.Where("verification_status = ? OR verification_status = ?", "failed_verification", "unverified")
+	if role != "admin" && role != "reviewer" && tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
 
+	err := query.Order("created_at desc").Find(&documents).Error
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch review queue"})
 	}
@@ -39,26 +37,8 @@ func ListReviewQueue(c *fiber.Ctx) error {
 	return c.JSON(documents)
 }
 
-// ReviewDocument submits manual verification corrections
+// ReviewDocument submits manual verification corrections and triggers on-chain KYC/alias registration
 func ReviewDocument(c *fiber.Ctx) error {
-	tenantIDStr, ok := c.Locals("tenant_id").(string)
-	if !ok || tenantIDStr == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized tenant"})
-	}
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid tenant ID"})
-	}
-
-	userIDStr, ok := c.Locals("user_id").(string)
-	if !ok || userIDStr == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized user"})
-	}
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid user ID"})
-	}
-
 	role, _ := c.Locals("role").(string)
 	if role != "admin" && role != "reviewer" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only reviewers or admins can verify documents"})
@@ -75,10 +55,23 @@ func ReviewDocument(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
 	}
 
-	// Fetch document and verify tenant
+	// Fetch document (Admins can review any document across the system)
 	var document models.Document
-	if err := db.DB.Where("id = ? AND tenant_id = ?", docID, tenantID).First(&document).Error; err != nil {
+	query := db.DB.Where("id = ?", docID)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
+	if role != "admin" && tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
+
+	if err := query.First(&document).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Document not found"})
+	}
+
+	userIDStr, _ := c.Locals("user_id").(string)
+	userID, _ := uuid.Parse(userIDStr)
+	tenantID, _ := uuid.Parse(tenantIDStr)
+	if tenantID == uuid.Nil {
+		tenantID = document.TenantID
 	}
 
 	err = db.DB.Transaction(func(tx *gorm.DB) error {
@@ -198,7 +191,7 @@ func ReviewDocument(c *fiber.Ctx) error {
 		}
 
 		if finalFirst != "" && finalSurname != "" && finalDOB != "" {
-			isDup, err := isDuplicateVerifiedIdentity(tenantIDStr, finalFirst, finalSurname, finalDOB, document.ID.String())
+			isDup, err := isDuplicateVerifiedIdentity(tenantID.String(), finalFirst, finalSurname, finalDOB, document.ID.String())
 			if err != nil {
 				return err
 			}

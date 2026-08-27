@@ -177,3 +177,57 @@ func JWTMiddleware(c *fiber.Ctx) error {
 
 	return c.Next()
 }
+
+// OptionalJWTMiddleware checks for a Bearer token if provided, injecting claims, without blocking if absent
+func OptionalJWTMiddleware(c *fiber.Ctx) error {
+	authHeader := c.Get("Authorization")
+	if authHeader == "" {
+		return c.Next()
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		return c.Next()
+	}
+
+	tokenStr := parts[1]
+	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return jwtSecret, nil
+	})
+
+	if err == nil && token.Valid {
+		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+			c.Locals("user_id", claims["user_id"])
+			c.Locals("tenant_id", claims["tenant_id"])
+			c.Locals("role", claims["role"])
+		}
+	}
+
+	return c.Next()
+}
+
+// RequireAdminOrReviewer restricts endpoint access to authenticated users with admin or reviewer privileges
+func RequireAdminOrReviewer(c *fiber.Ctx) error {
+	role, _ := c.Locals("role").(string)
+	if role != "admin" && role != "reviewer" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Forbidden: Admin or Reviewer access required to check and review documents",
+		})
+	}
+	return c.Next()
+}
+
+// RequireAdmin restricts endpoint access strictly to admin users
+func RequireAdmin(c *fiber.Ctx) error {
+	role, _ := c.Locals("role").(string)
+	if role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "Forbidden: Admin access required",
+		})
+	}
+	return c.Next()
+}
+

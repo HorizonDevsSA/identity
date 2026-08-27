@@ -19,34 +19,78 @@ import (
 	"github.com/google/uuid"
 )
 
-// UploadDocument handles document upload, saves it to MinIO, creates a database record,
-// and publishes a job to the Redis queue for async OCR processing.
-func UploadDocument(c *fiber.Ctx) error {
-	tenantIDStr, ok := c.Locals("tenant_id").(string)
-	if !ok || tenantIDStr == "" {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized tenant"})
-	}
-	tenantID, err := uuid.Parse(tenantIDStr)
+// GetOrCreateDefaultTenant returns the global system default tenant and its default project for open uploads
+func GetOrCreateDefaultTenant() (models.Tenant, models.Project, error) {
+	var tenant models.Tenant
+	err := db.DB.Where("name = ?", "Default System Tenant").First(&tenant).Error
 	if err != nil {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid tenant ID"})
+		tenant = models.Tenant{
+			ID:   uuid.New(),
+			Name: "Default System Tenant",
+		}
+		if err := db.DB.Create(&tenant).Error; err != nil {
+			return tenant, models.Project{}, err
+		}
 	}
 
-	// Parse project ID (optional, fall back to default project if not provided)
-	projectIDStr := c.FormValue("project_id")
+	var project models.Project
+	err = db.DB.Where("tenant_id = ? AND name = ?", tenant.ID, "Default Project").First(&project).Error
+	if err != nil {
+		project = models.Project{
+			ID:       uuid.New(),
+			Name:     "Default Project",
+			TenantID: tenant.ID,
+		}
+		if err := db.DB.Create(&project).Error; err != nil {
+			return tenant, project, err
+		}
+	}
+
+	return tenant, project, nil
+}
+
+// UploadDocument handles document upload, saves it to MinIO, creates a database record,
+// and publishes a job to the Redis queue for async OCR processing.
+// Supports open public uploads (fallback to system default tenant) as well as authenticated tenant uploads.
+func UploadDocument(c *fiber.Ctx) error {
+	var tenantID uuid.UUID
 	var projectID uuid.UUID
-	if projectIDStr != "" {
-		projectID, err = uuid.Parse(projectIDStr)
+
+	tenantIDStr, ok := c.Locals("tenant_id").(string)
+	if ok && tenantIDStr != "" {
+		var err error
+		tenantID, err = uuid.Parse(tenantIDStr)
 		if err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid project ID"})
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid tenant ID"})
+		}
+
+		projectIDStr := c.FormValue("project_id")
+		if projectIDStr != "" {
+			projectID, err = uuid.Parse(projectIDStr)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid project ID"})
+			}
+		} else {
+			var defaultProj models.Project
+			err = db.DB.Where("tenant_id = ? AND name = ?", tenantID, "Default Project").First(&defaultProj).Error
+			if err != nil {
+				defaultProj = models.Project{
+					ID:       uuid.New(),
+					Name:     "Default Project",
+					TenantID: tenantID,
+				}
+				db.DB.Create(&defaultProj)
+			}
+			projectID = defaultProj.ID
 		}
 	} else {
-		// Find default project for the tenant
-		var defaultProj models.Project
-		err = db.DB.Where("tenant_id = ? AND name = ?", tenantID, "Default Project").First(&defaultProj).Error
+		// Public upload: fallback to system default tenant & project seamlessly
+		sysTenant, sysProj, err := GetOrCreateDefaultTenant()
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Default project not found"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to initialize default tenant for upload"})
 		}
-		projectID = defaultProj.ID
+		tenantID = sysTenant.ID
+		projectID = sysProj.ID
 	}
 
 	// Parse file from form
@@ -247,9 +291,10 @@ func UploadDocument(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusAccepted).JSON(document)
 }
 
-// GetDocument returns a single document details
+// GetDocument returns a single document details (Admin/Reviewer access)
 func GetDocument(c *fiber.Ctx) error {
-	tenantIDStr := c.Locals("tenant_id").(string)
+	role, _ := c.Locals("role").(string)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
 	docIDStr := c.Params("id")
 
 	docID, err := uuid.Parse(docIDStr)
@@ -258,7 +303,11 @@ func GetDocument(c *fiber.Ctx) error {
 	}
 
 	var document models.Document
-	if err := db.DB.Where("id = ? AND tenant_id = ?", docID, tenantIDStr).First(&document).Error; err != nil {
+	query := db.DB.Where("id = ?", docID)
+	if role != "admin" && role != "reviewer" && tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
+	if err := query.First(&document).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Document not found"})
 	}
 
@@ -279,7 +328,8 @@ func GetDocument(c *fiber.Ctx) error {
 
 // GetDocumentPrediction returns the predictions/OCR results for the document
 func GetDocumentPrediction(c *fiber.Ctx) error {
-	tenantIDStr := c.Locals("tenant_id").(string)
+	role, _ := c.Locals("role").(string)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
 	docIDStr := c.Params("id")
 
 	docID, err := uuid.Parse(docIDStr)
@@ -287,9 +337,12 @@ func GetDocumentPrediction(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid document ID"})
 	}
 
-	// Verify document belongs to tenant
 	var document models.Document
-	if err := db.DB.Where("id = ? AND tenant_id = ?", docID, tenantIDStr).First(&document).Error; err != nil {
+	query := db.DB.Where("id = ?", docID)
+	if role != "admin" && role != "reviewer" && tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
+	if err := query.First(&document).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Document not found"})
 	}
 
@@ -301,12 +354,17 @@ func GetDocumentPrediction(c *fiber.Ctx) error {
 	return c.JSON(prediction)
 }
 
-// ListDocuments lists documents for the tenant
+// ListDocuments lists documents (Admins can view all records; tenants view their own)
 func ListDocuments(c *fiber.Ctx) error {
-	tenantIDStr := c.Locals("tenant_id").(string)
+	role, _ := c.Locals("role").(string)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
 
 	var documents []models.Document
-	if err := db.DB.Where("tenant_id = ?", tenantIDStr).Order("created_at desc").Find(&documents).Error; err != nil {
+	query := db.DB
+	if role != "admin" && role != "reviewer" && tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
+	if err := query.Order("created_at desc").Find(&documents).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch documents"})
 	}
 
@@ -322,7 +380,7 @@ type VerificationLookupRequest struct {
 
 // CheckVerificationStatus checks if a user is verified using document_type/id_number or first_name/surname
 func CheckVerificationStatus(c *fiber.Ctx) error {
-	tenantIDStr := c.Locals("tenant_id").(string)
+	tenantIDStr, _ := c.Locals("tenant_id").(string)
 
 	var req VerificationLookupRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -339,7 +397,11 @@ func CheckVerificationStatus(c *fiber.Ctx) error {
 	}
 
 	var documents []models.Document
-	if err := db.DB.Where("tenant_id = ? AND verification_status = 'verified'", tenantIDStr).Find(&documents).Error; err != nil {
+	query := db.DB.Where("verification_status = 'verified'")
+	if tenantIDStr != "" {
+		query = query.Where("tenant_id = ?", tenantIDStr)
+	}
+	if err := query.Find(&documents).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to query documents"})
 	}
 
@@ -365,9 +427,10 @@ func CheckVerificationStatus(c *fiber.Ctx) error {
 
 		if matched {
 			return c.JSON(fiber.Map{
-				"verified":    true,
-				"document_id": doc.ID,
-				"matched_by":  matchedBy,
+				"verified":       true,
+				"document_id":    doc.ID,
+				"wallet_address": doc.WalletAddress,
+				"matched_by":     matchedBy,
 			})
 		}
 	}
@@ -415,7 +478,7 @@ func isDuplicateVerifiedIdentity(tenantIDStr, firstName, surname, dob, excludeDo
 	}
 
 	var docs []models.Document
-	err := db.DB.Where("tenant_id = ? AND verification_status = 'verified'", tenantIDStr).Find(&docs).Error
+	err := db.DB.Where("verification_status = 'verified'").Find(&docs).Error
 	if err != nil {
 		return false, err
 	}
