@@ -67,6 +67,11 @@ func Connect() {
 		&models.ExtractedField{},
 		&models.Feedback{},
 		&models.AuditLog{},
+		&models.OTPVerification{},
+		&models.DeviceToken{},
+		&models.NotificationPreference{},
+		&models.Notification{},
+		&models.Device{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate schemas: %v", err)

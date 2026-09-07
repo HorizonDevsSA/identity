@@ -51,21 +51,19 @@
 			"name": "Auth",
 			"item": [
 				{
-					"name": "Register",
+					"name": "Send OTP",
 					"event": [
 						{
 							"listen": "test",
 							"script": {
 								"exec": [
-									"pm.test(\"Successful registration returns 201\", function () {",
-									"    pm.response.to.have.status(201);",
+									"pm.test(\"OTP request returns 200\", function () {",
+									"    pm.response.to.have.status(200);",
 									"});",
 									"",
-									"pm.test(\"Response contains JWT token and user info\", function () {",
+									"pm.test(\"Status is pending\", function () {",
 									"    var jsonData = pm.response.json();",
-									"    pm.expect(jsonData.token).to.be.a(\"string\");",
-									"    pm.expect(jsonData.user.email).to.eql(\"admin@acme.com\");",
-									"    pm.expect(jsonData.user.role).to.eql(\"admin\");",
+									"    pm.expect(jsonData.status).to.eql(\"pending\");",
 									"});"
 								],
 								"type": "text/javascript"
@@ -83,23 +81,66 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"tenant_name\": \"ACME Corp\",\n    \"email\": \"admin@acme.com\",\n    \"password\": \"securepassword123\"\n}"
+							"raw": "{\n    \"phone\": \"+263771234567\",\n    \"channel\": \"sms\",\n    \"locale\": \"en\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/auth/register",
+							"raw": "{{baseUrl}}/auth/otp/send",
 							"host": [
 								"{{baseUrl}}"
 							],
 							"path": [
 								"auth",
-								"register"
+								"otp",
+								"send"
 							]
 						}
 					},
 					"response": []
 				},
 				{
-					"name": "Login",
+					"name": "Resend OTP",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Resend OTP returns 200\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"phone\": \"+263771234567\",\n    \"channel\": \"call\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/otp/resend",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"otp",
+								"resend"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Verify OTP",
 					"event": [
 						{
 							"listen": "test",
@@ -107,7 +148,7 @@
 								"exec": [
 									"var jsonData = pm.response.json();",
 									"",
-									"pm.test(\"Successful login returns 200\", function () {",
+									"pm.test(\"Successful OTP verification returns 200\", function () {",
 									"    pm.response.to.have.status(200);",
 									"});",
 									"",
@@ -135,16 +176,75 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"email\": \"admin@acme.com\",\n    \"password\": \"securepassword123\"\n}"
+							"raw": "{\n    \"phone\": \"+263771234567\",\n    \"code\": \"000000\",\n    \"email\": \"user@example.com\"\n}"
 						},
 						"url": {
-							"raw": "{{baseUrl}}/auth/login",
+							"raw": "{{baseUrl}}/auth/otp/verify",
 							"host": [
 								"{{baseUrl}}"
 							],
 							"path": [
 								"auth",
-								"login"
+								"otp",
+								"verify"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Twilio Webhook Callback",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Webhook returns 200 OK\", function () {",
+									"    pm.response.to.have.status(200);",
+									"});"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "MessageSid",
+									"value": "SM1234567890",
+									"type": "text"
+								},
+								{
+									"key": "MessageStatus",
+									"value": "delivered",
+									"type": "text"
+								},
+								{
+									"key": "To",
+									"value": "+263771234567",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/twilio/webhook",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"twilio",
+								"webhook"
 							]
 						}
 					},

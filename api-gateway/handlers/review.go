@@ -224,6 +224,27 @@ func ReviewDocument(c *fiber.Ctx) error {
 			}(*document.WalletAddress, aliasType, aliasVal)
 		}
 
+		// Twilio SMS Notification: Alert user of KYC approval and wallet whitelisting
+		if document.AliasValue != nil && *document.AliasValue != "" {
+			recipientPhone := *document.AliasValue
+			aliasType := ""
+			if document.AliasType != nil {
+				aliasType = *document.AliasType
+			}
+			if aliasType == "phone" || strings.HasPrefix(recipientPhone, "+") {
+				walletStr := ""
+				if document.WalletAddress != nil {
+					walletStr = *document.WalletAddress
+				}
+				go func(to, wallet string) {
+					msg := fmt.Sprintf("Zimbabwe Coin (ZWC): Your identity verification has been approved! Your wallet address %s is now whitelisted.", wallet)
+					if _, err := services.SendSMS(to, msg); err != nil {
+						fmt.Printf("[TWILIO-SMS-ERROR] Failed to send KYC approval SMS to %s: %v\n", to, err)
+					}
+				}(recipientPhone, walletStr)
+			}
+		}
+
 		// 2. Continuous Learning Loop: Register corrected file in dataset
 		if req.AddToDatasetID != "" {
 			datasetID, err := uuid.Parse(req.AddToDatasetID)

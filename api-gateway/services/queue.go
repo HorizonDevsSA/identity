@@ -47,7 +47,6 @@ func PublishTrainingJob(ctx context.Context, payload TrainingJobPayload) error {
 	return nil
 }
 
-
 func InitRedis() {
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {

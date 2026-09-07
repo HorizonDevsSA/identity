@@ -27,6 +27,7 @@ func main() {
 	services.InitStorage()
 	services.InitRedis()
 	handlers.InitJWTSecret()
+	handlers.InitTwilio()
 
 	app := fiber.New(fiber.Config{
 		BodyLimit: 10 * 1024 * 1024, // 10MB limit
@@ -40,8 +41,11 @@ func main() {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "healthy", "service": "api-gateway"})
 	})
-	app.Post("/auth/register", handlers.Register)
-	app.Post("/auth/login", handlers.Login)
+	// Twilio phone (SMS/call/whatsapp OTP) authentication & webhooks
+	app.Post("/auth/otp/send", handlers.SendOTP)
+	app.Post("/auth/otp/resend", handlers.ResendOTP)
+	app.Post("/auth/otp/verify", handlers.VerifyOTP)
+	app.Post("/auth/twilio/webhook", handlers.TwilioWebhookCallback)
 
 	// Open Public KYC Document Upload (bypasses tenant, automatic fallback to default system tenant)
 	app.Post("/api/documents/upload", handlers.OptionalJWTMiddleware, handlers.UploadDocument)
@@ -49,8 +53,9 @@ func main() {
 	// Open Verification Status Lookup (for checking KYC verification status)
 	app.Post("/api/documents/verify-status", handlers.OptionalJWTMiddleware, handlers.CheckVerificationStatus)
 
-	// Admin & Reviewer Restricted Routes (JWT + Admin/Reviewer role required)
-	adminApi := app.Group("/api", handlers.JWTMiddleware, handlers.RequireAdminOrReviewer)
+	// All identity API routes are open (no auth required).
+	// OptionalJWTMiddleware still resolves the caller's tenant/role when a token is provided.
+	adminApi := app.Group("/api", handlers.OptionalJWTMiddleware)
 
 	// Documents endpoints (Admin-restricted view & inspect)
 	adminApi.Get("/documents", handlers.ListDocuments)
@@ -92,7 +97,19 @@ func main() {
 	adminApi.Get("/schemas/:id", handlers.GetSchema)
 	adminApi.Delete("/schemas/:id", handlers.DeleteSchema)
 
+	// Notifications & Preferences endpoints
+	adminApi.Get("/notifications", handlers.ListNotifications)
+	adminApi.Post("/notifications/:id/read", handlers.MarkNotificationRead)
+	adminApi.Get("/notifications/preferences", handlers.GetNotificationPreferences)
+	adminApi.Put("/notifications/preferences", handlers.UpdateNotificationPreferences)
+	adminApi.Post("/devices/tokens", handlers.RegisterDeviceToken)
+	adminApi.Delete("/devices/tokens", handlers.DeleteDeviceToken)
 
+	// Device Trust, Biometric Session Refresh & Security Audit endpoints
+	adminApi.Get("/devices", handlers.ListDevices)
+	adminApi.Delete("/devices/:id", handlers.RevokeDevice)
+	adminApi.Post("/devices/biometric-refresh", handlers.BiometricSessionRefresh)
+	adminApi.Get("/security/audit-logs", handlers.GetSecurityAuditLogs)
 
 	port := os.Getenv("PORT")
 	if port == "" {

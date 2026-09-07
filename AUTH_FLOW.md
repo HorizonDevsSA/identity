@@ -1,163 +1,157 @@
 # Identity API Gateway — Authentication & Authorization Flow
 
-This document describes the full authentication and authorization flow for the **ZWC Identity API Gateway** (`identity/api-gateway`).
+This document describes the full authentication, phone verification, and authorization flow for the **ZWC Identity API Gateway** (`identity/api-gateway`).
 
 ---
 
 ## Overview
 
-The gateway uses a **JWT-based (JSON Web Token) Bearer Token** scheme. 
-Following recent updates, the system employs a hybrid approach:
-- **Public Routes:** Registration, login, and health checks are fully open.
-- **Open Submissions:** Document uploads (`/api/documents/upload`) and status checks (`/api/documents/verify-status`) are conditionally open. They use an `OptionalJWTMiddleware` that injects user claims if a token is present, but falls back to a default system tenant if no token is provided.
-- **Protected Administrative Routes:** Document inspection, human review, and dataset management are strictly protected using `JWTMiddleware` along with role-based guards (`RequireAdmin`, `RequireAdminOrReviewer`).
+The gateway uses a **Phone-First Passwordless Authentication (Twilio Verify OTP)** paired with a **JWT-based (JSON Web Token) Bearer Token** scheme.
+
+- **Public Authentication Routes:** Phone OTP request (`/auth/otp/send`), OTP resend (`/auth/otp/resend`), OTP verification (`/auth/otp/verify`), and webhook callbacks (`/auth/twilio/webhook`).
+- **Open KYC Submissions:** Document uploads (`/api/documents/upload`) and status lookups (`/api/documents/verify-status`) are open submissions. They employ `OptionalJWTMiddleware` to attach authenticated tenant claims when present, automatically falling back to the system default tenant if unauthenticated.
+- **Protected Administrative Routes:** Document inspection, human review, and dataset management are protected using `JWTMiddleware` along with role-based guards (`RequireAdmin`, `RequireAdminOrReviewer`).
+- **Transactional SMS Alerts:** When document KYC reviews are finalized by an admin/reviewer, automated outbound SMS notifications are dispatched via Twilio Programmable Messaging to alert the user of approval/whitelisting.
 
 ---
 
 ## Architecture
 
 ```
-Client
+Client / Mobile App
   │
-  ├── POST /auth/register                  (public)
-  ├── POST /auth/login                     (public)
-  ├── GET  /health                         (public)
+  ├── POST /auth/otp/send                  (public - Twilio Verify OTP trigger)
+  ├── POST /auth/otp/resend                (public - Twilio Verify OTP resend)
+  ├── POST /auth/otp/verify                (public - OTP Check & JWT issuance)
+  ├── POST /auth/twilio/webhook            (public - Twilio signature-validated callback)
+  ├── GET  /health                         (public - Health check)
   │
-  ├── POST /api/documents/upload           (open submission / optional JWT)
-  ├── POST /api/documents/verify-status    (open submission / optional JWT)
+  ├── POST /api/documents/upload           (open KYC submission / optional JWT)
+  ├── POST /api/documents/verify-status    (open status check / optional JWT)
   │
   └── /api/*                               (protected administrative routes)
         │
-        └── JWTMiddleware ──► Role Guards ──► handler (ReviewDocument, etc.)
+        └── JWTMiddleware ──► Role Guards ──► Handler (ReviewDocument, Datasets, etc.)
 ```
 
 ---
 
-## 1. Registration (`POST /auth/register`)
+## 1. Request Verification Code (`POST /auth/otp/send`)
 
-Registers a new **Tenant** (organisation) and creates the first **Admin User** for that tenant.
+Dispatches an OTP verification code to the user's phone via Twilio Verify.
 
 ### Request
 ```http
-POST /auth/register
+POST /auth/otp/send
 Content-Type: application/json
 
 {
-  "tenant_name": "ACME Corp",
-  "email": "admin@acme.com",
-  "password": "securepassword123"
+  "phone": "+263771234567",
+  "channel": "sms",
+  "locale": "en"
+}
+```
+*Channels supported:* `"sms"` (default), `"call"`, `"whatsapp"`.
+
+### Server Logic
+1. Normalizes the phone number according to **E.164** standard (`+XXXXXXXXXX...`, 8-15 digits).
+2. **Rate Limiting / Abuse Prevention:** Enforces a 30-second cooldown between verification code requests for the same phone number.
+3. If Twilio Verify is configured (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`), calls the Twilio Verify v2 API.
+4. **Dev Mode Sandbox:** If Twilio credentials are omitted, automatically returns dev code `"000000"` for seamless local development and automated testing.
+5. Logs a pending `OTPVerification` record in PostgreSQL with a 10-minute expiry timestamp.
+
+---
+
+## 2. Resend Verification Code (`POST /auth/otp/resend`)
+
+Allows requesting a fresh verification code or switching channels (e.g., from SMS to voice call if SMS delivery is delayed).
+
+### Request
+```http
+POST /auth/otp/resend
+Content-Type: application/json
+
+{
+  "phone": "+263771234567",
+  "channel": "call"
+}
+```
+
+---
+
+## 3. Verify OTP & Issue Token (`POST /auth/otp/verify`)
+
+Validates the OTP code against Twilio Verify v2 and issues a signed JWT token.
+
+### Request
+```http
+POST /auth/otp/verify
+Content-Type: application/json
+
+{
+  "phone": "+263771234567",
+  "code": "123456",
+  "email": "user@example.com"
 }
 ```
 
 ### Server Logic
-1. Validates that `email`, `password`, and `tenant_name` are all present.
-2. Checks if a user with the same email already exists. Returns `409 Conflict` if so.
-3. Creates a new `Tenant` record in PostgreSQL (UUID primary key).
-4. Hashes the password using **bcrypt** (`DefaultCost = 10`).
-5. Creates a new `User` record with role `"admin"` linked to the new tenant.
-6. Creates a default `Project` for the tenant (`Default Project`).
-7. Calls `GenerateJWT` to produce a signed JWT token.
-8. Returns `201 Created` with the token and user object.
+1. Checks the submitted code against Twilio Verify v2 `VerificationCheck` (or validates `000000` in Dev Mode).
+2. If the code is invalid:
+   - Increments the `attempts` counter on the active `OTPVerification` record.
+   - Returns `401 Unauthorized`.
+3. If the code is approved:
+   - Finds or creates a **Tenant** and **User** record (with role `"admin"` on first registration, or links to existing user).
+   - Marks the `OTPVerification` record as `approved`.
+   - Generates a signed JWT token valid for 1 year.
+   - Returns `200 OK` with token and user object.
+
+### Response
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "c76f8274-06c8-47fb-a75d-6c17e47f2935",
+    "phone": "+263771234567",
+    "email": "user@example.com",
+    "role": "admin",
+    "tenant_id": "4bcfbe08-592b-4fa8-b223-28f80459c3f1",
+    "created_at": "2026-09-07T10:00:00Z"
+  },
+  "is_new_user": true,
+  "twilio_status": "approved"
+}
+```
 
 ---
 
-## 2. Login (`POST /auth/login`)
+## 4. JWT Token Structure
 
-Authenticates an existing user and returns a fresh JWT token.
-
-### Server Logic
-1. Looks up the user by email in PostgreSQL.
-2. Returns `401 Unauthorized` if the user is not found (generic to prevent enumeration attacks).
-3. Compares the supplied password against the stored bcrypt hash using `bcrypt.CompareHashAndPassword`.
-4. Returns `401 Unauthorized` if the password does not match.
-5. Calls `GenerateJWT` to produce a signed JWT token.
-6. Returns `200 OK` with the token and user object.
-
----
-
-## 3. JWT Token Structure
-
-Tokens are signed using **HMAC-SHA256** (`HS256`) with the `JWT_SECRET` environment variable.
+Tokens are signed with **HMAC-SHA256** (`HS256`) using `JWT_SECRET`.
 
 ### Claims
 | Claim       | Type   | Description                                    |
 |-------------|--------|------------------------------------------------|
 | `user_id`   | string | UUID of the authenticated user                 |
-| `tenant_id` | string | UUID of the user's tenant                      |
+| `tenant_id` | string | UUID of the user's organization tenant         |
 | `role`      | string | User role (`admin`, `user`, `reviewer`)        |
-| `exp`       | int64  | Expiry timestamp (1 year from time of issue)   |
+| `exp`       | int64  | Expiry timestamp (1 year from issue)           |
 
 ---
 
-## 4. Middlewares & Role Guards
+## 5. Webhook Callbacks (`POST /auth/twilio/webhook`)
 
-### `JWTMiddleware` (Strict Authentication)
-Used for all administrative routes.
-1. Reads the `Authorization` request header.
-2. Returns `401 Unauthorized` if missing, invalid format, or expired.
-3. Injects decoded claims into the Fiber request context: `user_id`, `tenant_id`, `role`.
+Receives asynchronous delivery status updates from Twilio for SMS and verification events.
 
-### `OptionalJWTMiddleware` (Flexible Authentication)
-Used for open endpoints like `/api/documents/upload`.
-1. Reads the `Authorization` request header.
-2. If present and valid, injects the claims (so authenticated users tie uploads to their tenant).
-3. If absent or invalid, it does **not** block the request, allowing the handler to fall back to a system-wide default tenant.
-
-### Role Guards (`RequireAdmin`, `RequireAdminOrReviewer`)
-Applied after `JWTMiddleware` on administrative routes to ensure the caller has the necessary permissions.
+- Validates the `X-Twilio-Signature` header using Twilio's HMAC-SHA1 signature verification protocol against the full webhook URL and sorted request parameters.
+- Responds with `200 OK` and empty `<Response></Response>` TwiML.
 
 ---
 
-## 5. Endpoints & Access Control
+## 6. KYC Review & SMS Notification Flow
 
-| Method   | Path                                      | Access Level                                     |
-|----------|-------------------------------------------|--------------------------------------------------|
-| `POST`   | `/api/documents/upload`                   | Open (Optional JWT)                              |
-| `POST`   | `/api/documents/verify-status`            | Open (Optional JWT)                              |
-| `GET`    | `/api/documents`                          | Admin / Reviewer (Cross-tenant allowed)          |
-| `GET`    | `/api/documents/:id`                      | Admin / Reviewer (Cross-tenant allowed)          |
-| `GET`    | `/api/documents/:id/prediction`           | Admin / Reviewer                                 |
-| `POST`   | `/api/documents/:id/review`               | Admin / Reviewer (Cross-tenant allowed)          |
-| `GET`    | `/api/reviews`                            | Admin / Reviewer (Cross-tenant allowed)          |
-| `POST`   | `/api/datasets`                           | Protected (Tenant Scoped)                        |
-| `GET`    | `/api/datasets`                           | Protected (Tenant Scoped)                        |
-
-*(Note: Admins and Reviewers bypass the `tenant_id` restrictions when inspecting and reviewing documents, allowing them to manage submissions system-wide.)*
-
----
-
-## 6. Full Registration → Upload → Verification Flow
-
-```
-Client                          API Gateway                    PostgreSQL / Blockchain
-  │                                   │                               │
-  │── POST /auth/register ───────────►│                               │
-  │                                   │── INSERT Tenant ─────────────►│
-  │                                   │── INSERT User (admin) ────────►│
-  │◄── 201 { token, user } ──────────│                               │
-  │                                   │                               │
-  │── POST /api/documents/upload ────►│                               │
-  │   (No auth required)              │                               │
-  │                                   │── OptionalJWTMiddleware        │
-  │                                   │── Fallback to Default Tenant   │
-  │                                   │── DeriveWalletAddress()        │
-  │                                   │   SHA256(id_number + salt)     │
-  │                                   │── INSERT Document record ─────►│
-  │◄── 202 { id, wallet_address } ───│                               │
-  │                                   │                               │
-  │── POST /api/documents/:id/review ►│                               │
-  │   Authorization: Bearer <token>   │                               │
-  │                                   │── JWTMiddleware: verify token  │
-  │                                   │── RequireAdminOrReviewer guard │
-  │                                   │── UPDATE Document status ─────►│
-  │                                   │── go RegisterUserOnChain()     │
-  │◄── 200 { verified: true } ───────│                               │
-```
-
----
-
-## 7. Security Notes
-
-- **Tenant Bypassing**: Admins and Reviewers are granted global scope when querying documents, meaning `tenant_id` filters are ignored for them.
-- **Global Duplicate Checks**: `isDuplicateVerifiedIdentity` now checks globally across the entire system, preventing the same person from being verified twice under different tenants.
-- **Wallet Address Generation**: The `wallet_address` is **never supplied by the user**. It is derived deterministically server-side from the ID number.
+When a reviewer or admin verifies a KYC document via `POST /api/documents/:id/review`:
+1. The document is marked `verified` and `completed`.
+2. Asynchronously registers the user's deterministic wallet address and alias on the ZWC blockchain rail (`x/kyc` and `x/alias`).
+3. If an alias phone number is present, dispatches an automated SMS alert via Twilio Programmable Messaging:
+   > *"Zimbabwe Coin (ZWC): Your identity verification has been approved! Your wallet address zwc1... is now whitelisted."*

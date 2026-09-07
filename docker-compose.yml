@@ -84,6 +84,11 @@ services:
       - PORT=8080
       - ENCRYPTION_KEY=super_secret_key_32_bytes_long!!
       - CLAMAV_URL=clamav:3310
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_VERIFY_SERVICE_SID=${TWILIO_VERIFY_SERVICE_SID:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      - TWILIO_MESSAGING_SERVICE_SID=${TWILIO_MESSAGING_SERVICE_SID:-}
     depends_on:
       postgres:
         condition: service_healthy

@@ -17,8 +17,9 @@ type Tenant struct {
 
 type User struct {
 	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Email        string         `gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash string         `gorm:"not null" json:"-"`
+	Phone        string         `gorm:"uniqueIndex;not null" json:"phone"`
+	Email        string         `gorm:"uniqueIndex" json:"email,omitempty"`
+	PasswordHash string         `gorm:"not null;default:'-'" json:"-"`
 	Role         string         `gorm:"default:'user'" json:"role"` // 'admin', 'user', 'reviewer'
 	TenantID     uuid.UUID      `gorm:"type:uuid;index" json:"tenant_id"`
 	Tenant       Tenant         `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
@@ -47,14 +48,14 @@ const (
 )
 
 type Document struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	Filename    string         `gorm:"not null" json:"filename"`
-	FilePath    string         `gorm:"not null" json:"file_path"` // Path in object storage
-	Status      string         `gorm:"default:'pending'" json:"status"` // 'pending', 'processing', 'completed', 'failed'
-	TenantID    uuid.UUID      `gorm:"type:uuid;index" json:"tenant_id"`
-	Tenant      Tenant         `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-	ProjectID   uuid.UUID      `gorm:"type:uuid;index" json:"project_id"`
-	Project     Project        `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Filename  string    `gorm:"not null" json:"filename"`
+	FilePath  string    `gorm:"not null" json:"file_path"`       // Path in object storage
+	Status    string    `gorm:"default:'pending'" json:"status"` // 'pending', 'processing', 'completed', 'failed'
+	TenantID  uuid.UUID `gorm:"type:uuid;index" json:"tenant_id"`
+	Tenant    Tenant    `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	ProjectID uuid.UUID `gorm:"type:uuid;index" json:"project_id"`
+	Project   Project   `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	// Entered metadata (from user upload form)
 	EnteredDocType     *DocumentType    `json:"entered_doc_type"`
 	EnteredIDNumber    *EncryptedString `json:"entered_id_number"`
@@ -76,17 +77,17 @@ type Document struct {
 	ExtractedSex         *EncryptedString `json:"extracted_sex"`
 
 	// Verification status & results
-	VerificationStatus string         `gorm:"default:'unverified'" json:"verification_status"` // 'unverified', 'verified', 'failed_verification'
-	VerificationResult *string        `gorm:"type:text" json:"verification_result"` // JSON details of matching fields
+	VerificationStatus string  `gorm:"default:'unverified'" json:"verification_status"` // 'unverified', 'verified', 'failed_verification'
+	VerificationResult *string `gorm:"type:text" json:"verification_result"`            // JSON details of matching fields
 
 	// Blockchain registration target
 	WalletAddress *string `json:"wallet_address"`
 	AliasType     *string `json:"alias_type"`
 	AliasValue    *string `json:"alias_value"`
 
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 type Prediction struct {
@@ -152,8 +153,8 @@ type Model struct {
 type ModelVersion struct {
 	ID            uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	ModelID       uuid.UUID      `gorm:"type:uuid;index" json:"model_id"`
-	Version       string         `gorm:"not null" json:"version"` // e.g. "v1.0.0"
-	FilePath      string         `gorm:"not null" json:"file_path"` // Path in MinIO to model weights
+	Version       string         `gorm:"not null" json:"version"`          // e.g. "v1.0.0"
+	FilePath      string         `gorm:"not null" json:"file_path"`        // Path in MinIO to model weights
 	Status        string         `gorm:"default:'inactive'" json:"status"` // 'active', 'inactive', 'deprecated'
 	Accuracy      float64        `json:"accuracy"`
 	TrainingJobID *uuid.UUID     `gorm:"type:uuid" json:"training_job_id,omitempty"`
@@ -198,28 +199,40 @@ type ExtractionSchema struct {
 }
 
 type ExtractedField struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	DocumentID  uuid.UUID      `gorm:"type:uuid;index" json:"document_id"`
-	Document    Document       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
-	Key         string         `gorm:"not null" json:"key"`
+	ID          uuid.UUID       `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	DocumentID  uuid.UUID       `gorm:"type:uuid;index" json:"document_id"`
+	Document    Document        `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	Key         string          `gorm:"not null" json:"key"`
 	Value       EncryptedString `json:"value"`
-	Confidence  float64        `json:"confidence"`
-	BoundingBox string         `json:"bounding_box"` // coordinates e.g. [[xmin, ymin], [xmax, ymax]]
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	Confidence  float64         `json:"confidence"`
+	BoundingBox string          `json:"bounding_box"` // coordinates e.g. [[xmin, ymin], [xmax, ymax]]
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt  `gorm:"index" json:"-"`
 }
 
 type Feedback struct {
-	ID             uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
-	DocumentID     uuid.UUID `gorm:"type:uuid;index" json:"document_id"`
-	Document       Document  `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	ID             uuid.UUID       `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	DocumentID     uuid.UUID       `gorm:"type:uuid;index" json:"document_id"`
+	Document       Document        `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	FieldName      string          `gorm:"not null" json:"field_name"`
 	OriginalValue  EncryptedString `json:"original_value"`
 	CorrectedValue EncryptedString `json:"corrected_value"`
-	ReviewedBy     uuid.UUID `gorm:"type:uuid;index" json:"reviewed_by"`
-	User           User      `gorm:"foreignKey:ReviewedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
+	ReviewedBy     uuid.UUID       `gorm:"type:uuid;index" json:"reviewed_by"`
+	User           User            `gorm:"foreignKey:ReviewedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"-"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+// OTPVerification tracks a pending phone verification (Twilio Verify)
+type OTPVerification struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	Phone     string    `gorm:"index;not null" json:"phone"`
+	Channel   string    `gorm:"default:'sms'" json:"channel"`    // 'sms' or 'call'
+	Status    string    `gorm:"default:'pending'" json:"status"` // 'pending', 'approved', 'expired'
+	Attempts  int       `gorm:"default:0" json:"attempts"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type AuditLog struct {
@@ -229,9 +242,56 @@ type AuditLog struct {
 	User      User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	Action    string    `gorm:"not null" json:"action"`
 	Details   string    `gorm:"type:text" json:"details"`
+	UserAgent string    `json:"user_agent,omitempty"`
+	Metadata  string    `gorm:"type:text;default:'{}'" json:"metadata,omitempty"`
 	IPAddress string    `json:"ip_address"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type DeviceToken struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID     uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	User       User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	FCMToken   string    `gorm:"not null" json:"fcm_token"`
+	Platform   string    `gorm:"not null;default:'android'" json:"platform"` // 'ios', 'android', 'web'
+	DeviceName string    `json:"device_name,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
 
+type NotificationPreference struct {
+	UserID            uuid.UUID `gorm:"type:uuid;primaryKey" json:"user_id"`
+	User              User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	IncomingTransfers bool      `gorm:"default:true" json:"incoming_transfers"`
+	OutgoingTransfers bool      `gorm:"default:true" json:"outgoing_transfers"`
+	MerchantActivity  bool      `gorm:"default:true" json:"merchant_activity"`
+	SMSFallback       bool      `gorm:"default:true" json:"sms_fallback"`
+	Marketing         bool      `gorm:"default:false" json:"marketing"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
 
+type Notification struct {
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID    uuid.UUID  `gorm:"type:uuid;index;not null" json:"user_id"`
+	User      User       `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	Type      string     `gorm:"not null" json:"type"` // e.g. 'payment_received', 'kyc_verified', 'security_alert'
+	Title     string     `gorm:"not null" json:"title"`
+	Body      string     `gorm:"type:text;not null" json:"body"`
+	Data      string     `gorm:"type:text;default:'{}'" json:"data"` // JSON payload
+	Status    string     `gorm:"default:'pending'" json:"status"`    // 'pending', 'sent', 'failed', 'read'
+	SentAt    *time.Time `json:"sent_at,omitempty"`
+	ReadAt    *time.Time `json:"read_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type Device struct {
+	ID          uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID      uuid.UUID `gorm:"type:uuid;index;not null" json:"user_id"`
+	User        User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
+	DeviceHash  string    `gorm:"index;not null" json:"device_hash"`
+	DeviceName  string    `json:"device_name,omitempty"`
+	PublicKey   string    `json:"public_key,omitempty"`
+	Trusted     bool      `gorm:"default:true" json:"trusted"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+}
