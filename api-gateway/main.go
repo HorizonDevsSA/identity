@@ -115,6 +115,13 @@ func main() {
 	adminApi.Post("/devices/biometric-refresh", handlers.BiometricSessionRefresh)
 	adminApi.Get("/security/audit-logs", handlers.GetSecurityAuditLogs)
 
+	// Merchant Profile endpoints
+	adminApi.Post("/merchants/register", handlers.RegisterMerchant)
+	adminApi.Get("/merchants/profile", handlers.RequireRoles(models.RoleMerchant, models.RoleAdmin), handlers.GetMerchantProfile)
+
+	// Admin Governance & Role Assignment
+	adminApi.Post("/admin/roles/assign", handlers.RequireAdmin, handlers.AssignUserRole)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

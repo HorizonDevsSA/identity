@@ -15,17 +15,41 @@ type Tenant struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
+const (
+	RoleUser      = "user"      // Standard personal account
+	RoleMerchant  = "merchant"  // Verified business / merchant POS
+	RoleModerator = "moderator" // Compliance reviewer / KYC verifier
+	RoleAdmin     = "admin"     // Platform superadmin
+)
+
 type User struct {
 	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
 	Phone        string         `gorm:"uniqueIndex;not null" json:"phone"`
 	Email        string         `gorm:"uniqueIndex" json:"email,omitempty"`
 	PasswordHash string         `gorm:"not null;default:'-'" json:"-"`
-	Role         string         `gorm:"default:'user'" json:"role"` // 'admin', 'user', 'reviewer'
+	Role         string         `gorm:"default:'user'" json:"role"` // 'user', 'merchant', 'moderator', 'admin'
 	TenantID     uuid.UUID      `gorm:"type:uuid;index" json:"tenant_id"`
 	Tenant       Tenant         `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"-"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type MerchantProfile struct {
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"id"`
+	UserID           uuid.UUID `gorm:"type:uuid;uniqueIndex;not null" json:"user_id"`
+	TenantID         uuid.UUID `gorm:"type:uuid;index" json:"tenant_id"`
+	BusinessName     string    `gorm:"not null" json:"business_name"`
+	TaxNumber        string    `gorm:"index" json:"tax_number"`
+	Category         string    `json:"category"` // Retail, Grocery, Fuel, Hospitality
+	StaticQRURI      string    `json:"static_qr_uri"`
+	WebhookURL       string    `json:"webhook_url"`
+	DailyLimit       float64   `gorm:"default:100000.0" json:"daily_limit"`
+	PreAuthEnabled   bool      `gorm:"default:true" json:"pre_auth_enabled"`
+	SettlementBank   string    `json:"settlement_bank"`
+	SettlementAccNum string    `json:"settlement_acc_num"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type Project struct {

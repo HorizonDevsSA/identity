@@ -387,12 +387,34 @@ func OptionalJWTMiddleware(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+// RequireRoles restricts endpoint access to specified roles (e.g. "admin", "merchant", "moderator", "user")
+func RequireRoles(allowedRoles ...string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		role, _ := c.Locals("role").(string)
+		if role == "" {
+			role = "user"
+		}
+		// Superadmin always has access across all privileged endpoints
+		if role == "admin" {
+			return c.Next()
+		}
+		for _, r := range allowedRoles {
+			if role == r || (r == "moderator" && role == "reviewer") {
+				return c.Next()
+			}
+		}
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": fmt.Sprintf("Forbidden: requires one of roles: %v", allowedRoles),
+		})
+	}
+}
+
 // RequireAdminOrReviewer restricts endpoint access to authenticated users with admin or reviewer privileges
 func RequireAdminOrReviewer(c *fiber.Ctx) error {
 	role, _ := c.Locals("role").(string)
-	if role != "admin" && role != "reviewer" {
+	if role != "admin" && role != "reviewer" && role != "moderator" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "Forbidden: Admin or Reviewer access required to check and review documents",
+			"error": "Forbidden: Admin or Moderator access required",
 		})
 	}
 	return c.Next()

@@ -72,6 +72,7 @@ func Connect() {
 		&models.NotificationPreference{},
 		&models.Notification{},
 		&models.Device{},
+		&models.MerchantProfile{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to auto-migrate schemas: %v", err)

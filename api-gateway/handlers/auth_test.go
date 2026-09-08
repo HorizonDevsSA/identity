@@ -114,6 +114,22 @@ func setupTestApp(t *testing.T) *fiber.App {
 			first_seen_at DATETIME,
 			last_seen_at DATETIME
 		);
+		CREATE TABLE IF NOT EXISTS merchant_profiles (
+			id TEXT PRIMARY KEY,
+			user_id TEXT UNIQUE NOT NULL,
+			tenant_id TEXT,
+			business_name TEXT NOT NULL,
+			tax_number TEXT,
+			category TEXT,
+			static_qr_uri TEXT,
+			webhook_url TEXT,
+			daily_limit REAL DEFAULT 100000.0,
+			pre_auth_enabled BOOLEAN DEFAULT 1,
+			settlement_bank TEXT,
+			settlement_acc_num TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		);
 	`
 	if err := database.Exec(schema).Error; err != nil {
 		t.Fatalf("failed to create sqlite schema: %v", err)
