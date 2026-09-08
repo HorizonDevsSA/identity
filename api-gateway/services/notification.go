@@ -98,16 +98,33 @@ func SendNotification(ctx context.Context, req NotifyRequest) (*models.Notificat
 		return nil, fmt.Errorf("failed to persist notification: %w", err)
 	}
 
-	// 3. Dispatch to registered FCM device tokens
+	// 3. Dispatch to registered FCM device tokens using Firebase Admin SDK
 	var tokens []models.DeviceToken
 	db.DB.Where("user_id = ?", req.UserID).Find(&tokens)
 
 	pushedToDevice := false
-	for _, dt := range tokens {
-		// Mock / Real FCM dispatch: In production, delegates to Firebase FCM SDK
-		log.Printf("[FCM-PUSH] Dispatching to Token=%s (Platform=%s, User=%s) | Title=%q | Body=%q",
-			dt.FCMToken, dt.Platform, req.UserID, req.Title, req.Body)
-		pushedToDevice = true
+	if len(tokens) > 0 {
+		var tokenList []string
+		for _, dt := range tokens {
+			if strings.TrimSpace(dt.FCMToken) != "" {
+				tokenList = append(tokenList, dt.FCMToken)
+			}
+		}
+
+		if len(tokenList) > 0 {
+			invalidTokens, err := SendFCMMulticast(ctx, tokenList, req.Title, req.Body, req.Data)
+			if err != nil {
+				log.Printf("[NOTIF] Warning: FCM multicast failed for user %s: %v", req.UserID, err)
+			} else {
+				pushedToDevice = true
+			}
+
+			// Clean up stale or invalid tokens automatically
+			for _, invTok := range invalidTokens {
+				log.Printf("[NOTIF] Pruning invalid FCM token for user %s: %s", req.UserID, invTok)
+				_ = RemoveDeviceToken(req.UserID, invTok)
+			}
+		}
 	}
 
 	// 4. SMS Fallback if no device tokens exist or SMS fallback is enabled for critical alerts
@@ -140,6 +157,64 @@ func SendNotification(ctx context.Context, req NotifyRequest) (*models.Notificat
 	notif.SentAt = &now
 
 	return &notif, nil
+}
+
+// NotifyTransactionEvent constructs and dispatches a rich transaction push notification
+func NotifyTransactionEvent(ctx context.Context, userID uuid.UUID, eventType, txHash, amount, currency, counterparty, status string) (*models.Notification, error) {
+	if currency == "" {
+		currency = "ZWC"
+	}
+	if status == "" {
+		status = "confirmed"
+	}
+
+	var title, body string
+	switch eventType {
+	case "payment_received":
+		title = fmt.Sprintf("Payment Received: +%s %s", amount, currency)
+		if counterparty != "" {
+			body = fmt.Sprintf("You received %s %s from %s. Tap to view transaction.", amount, currency, counterparty)
+		} else {
+			body = fmt.Sprintf("You received %s %s. Tap to view transaction.", amount, currency)
+		}
+	case "payment_sent":
+		title = fmt.Sprintf("Payment Sent: -%s %s", amount, currency)
+		if counterparty != "" {
+			body = fmt.Sprintf("Sent %s %s to %s successfully.", amount, currency, counterparty)
+		} else {
+			body = fmt.Sprintf("Sent %s %s successfully.", amount, currency)
+		}
+	case "reserve_minted":
+		title = "ZWC Reserve Minted"
+		body = fmt.Sprintf("Successfully minted %s %s against your reserve collateral.", amount, currency)
+	case "reserve_redeemed":
+		title = "ZWC Reserve Redeemed"
+		body = fmt.Sprintf("Redeemed %s %s into your local fiat settlement account.", amount, currency)
+	case "preauth_hold_created":
+		title = "Pre-Authorization Hold"
+		body = fmt.Sprintf("Merchant hold of %s %s has been placed.", amount, currency)
+	default:
+		title = "Transaction Update"
+		body = fmt.Sprintf("Your transaction of %s %s is %s.", amount, currency, status)
+	}
+
+	data := map[string]string{
+		"type":         eventType,
+		"tx_hash":      txHash,
+		"amount":       amount,
+		"currency":     currency,
+		"counterparty": counterparty,
+		"status":       status,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	return SendNotification(ctx, NotifyRequest{
+		UserID: userID,
+		Type:   eventType,
+		Title:  title,
+		Body:   body,
+		Data:   data,
+	})
 }
 
 // GetOrCreatePreferences retrieves or initializes a user's notification preferences

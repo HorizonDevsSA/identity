@@ -28,6 +28,9 @@ func main() {
 	services.InitRedis()
 	handlers.InitJWTSecret()
 	handlers.InitTwilio()
+	if err := services.InitFirebase(); err != nil {
+		log.Printf("[FIREBASE-INIT-WARN] Firebase initialization warning: %v", err)
+	}
 
 	app := fiber.New(fiber.Config{
 		BodyLimit: 10 * 1024 * 1024, // 10MB limit
@@ -104,6 +107,7 @@ func main() {
 	adminApi.Put("/notifications/preferences", handlers.UpdateNotificationPreferences)
 	adminApi.Post("/devices/tokens", handlers.RegisterDeviceToken)
 	adminApi.Delete("/devices/tokens", handlers.DeleteDeviceToken)
+	adminApi.Post("/transactions/notify", handlers.NotifyTransaction)
 
 	// Device Trust, Biometric Session Refresh & Security Audit endpoints
 	adminApi.Get("/devices", handlers.ListDevices)

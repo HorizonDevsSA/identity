@@ -10,6 +10,7 @@ import (
 
 	"api-gateway/db"
 	"api-gateway/models"
+	"api-gateway/services"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -39,6 +40,7 @@ func setupNotificationsTestApp(t *testing.T) (*fiber.App, string, uuid.UUID) {
 	notifGroup.Put("/notifications/preferences", UpdateNotificationPreferences)
 	notifGroup.Post("/devices/tokens", RegisterDeviceToken)
 	notifGroup.Delete("/devices/tokens", DeleteDeviceToken)
+	notifGroup.Post("/transactions/notify", NotifyTransaction)
 
 	return app, token, userID
 }
@@ -148,3 +150,44 @@ func TestDeviceTokens_Endpoints(t *testing.T) {
 		t.Fatalf("expected 200 deleting push token, got %d", resp.StatusCode)
 	}
 }
+
+func TestTransactions_NotifyEndpoint(t *testing.T) {
+	app, token, userID := setupNotificationsTestApp(t)
+
+	// Register a device token first
+	_ = services.RegisterDeviceToken(userID, "fcm_test_device_token_xyz", "android", "Pixel 8 Pro")
+
+	body, _ := json.Marshal(TransactionNotifyRequest{
+		UserID:       userID.String(),
+		Type:         "payment_received",
+		TxHash:       "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+		Amount:       "150.00",
+		Currency:     "ZWC",
+		Counterparty: "Tariro Moyo (+263771112233)",
+		Status:       "confirmed",
+	})
+
+	req := httptest.NewRequest("POST", "/api/transactions/notify", bytes.NewBuffer(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatalf("failed to execute request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from /api/transactions/notify, got %d", resp.StatusCode)
+	}
+
+	var res struct {
+		Message      string              `json:"message"`
+		Notification models.Notification `json:"notification"`
+	}
+	json.NewDecoder(resp.Body).Decode(&res)
+	if res.Notification.Title != "Payment Received: +150.00 ZWC" {
+		t.Errorf("unexpected notification title: %q", res.Notification.Title)
+	}
+	if res.Notification.Status != "sent" {
+		t.Errorf("expected status 'sent', got %q", res.Notification.Status)
+	}
+}
+

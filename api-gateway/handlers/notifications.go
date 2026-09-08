@@ -158,3 +158,61 @@ func DeleteDeviceToken(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "Device token removed"})
 }
+
+type TransactionNotifyRequest struct {
+	UserID       string `json:"user_id"`
+	Type         string `json:"type"` // payment_received, payment_sent, reserve_minted, etc.
+	TxHash       string `json:"tx_hash"`
+	Amount       string `json:"amount"`
+	Currency     string `json:"currency"`
+	Counterparty string `json:"counterparty"`
+	Status       string `json:"status"`
+}
+
+// NotifyTransaction dispatches a push notification and in-app feed item for a transaction event
+func NotifyTransaction(c *fiber.Ctx) error {
+	var req TransactionNotifyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	targetUserIDStr := req.UserID
+	if targetUserIDStr == "" {
+		if authID, ok := c.Locals("user_id").(string); ok {
+			targetUserIDStr = authID
+		}
+	}
+
+	if targetUserIDStr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
+	}
+
+	targetUserID, err := uuid.Parse(targetUserIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user_id format"})
+	}
+
+	if req.Type == "" {
+		req.Type = "payment_received"
+	}
+
+	notif, err := services.NotifyTransactionEvent(
+		c.Context(),
+		targetUserID,
+		req.Type,
+		req.TxHash,
+		req.Amount,
+		req.Currency,
+		req.Counterparty,
+		req.Status,
+	)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"message":      "Transaction notification dispatched",
+		"notification": notif,
+	})
+}
+

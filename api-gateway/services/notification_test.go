@@ -247,3 +247,38 @@ func TestDeviceTrust_Lifecycle(t *testing.T) {
 	}
 	_ = auditLogs
 }
+
+func TestNotifyTransactionEvent_Variations(t *testing.T) {
+	setupTestNotificationDB(t)
+
+	userID := uuid.New()
+	ctx := context.Background()
+
+	// 1. Payment Received
+	n1, err := NotifyTransactionEvent(ctx, userID, "payment_received", "0x111", "250.00", "ZWC", "+263771112233", "confirmed")
+	if err != nil {
+		t.Fatalf("unexpected error for payment_received: %v", err)
+	}
+	if n1.Title != "Payment Received: +250.00 ZWC" {
+		t.Errorf("unexpected title for payment_received: %s", n1.Title)
+	}
+
+	// 2. Payment Sent
+	n2, err := NotifyTransactionEvent(ctx, userID, "payment_sent", "0x222", "50.00", "ZWC", "Merchant ABC", "confirmed")
+	if err != nil {
+		t.Fatalf("unexpected error for payment_sent: %v", err)
+	}
+	if n2.Title != "Payment Sent: -50.00 ZWC" {
+		t.Errorf("unexpected title for payment_sent: %s", n2.Title)
+	}
+
+	// 3. Reserve Minted
+	n3, err := NotifyTransactionEvent(ctx, userID, "reserve_minted", "0x333", "1000.00", "ZWC", "", "confirmed")
+	if err != nil {
+		t.Fatalf("unexpected error for reserve_minted: %v", err)
+	}
+	if n3.Title != "ZWC Reserve Minted" {
+		t.Errorf("unexpected title for reserve_minted: %s", n3.Title)
+	}
+}
+
