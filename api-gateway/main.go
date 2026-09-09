@@ -6,6 +6,7 @@ import (
 
 	"api-gateway/db"
 	"api-gateway/handlers"
+	"api-gateway/models"
 	"api-gateway/services"
 
 	"github.com/gofiber/fiber/v2"
